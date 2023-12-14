@@ -1,0 +1,103 @@
+#include <iostream>
+#include <cmath>
+#include <ctime>
+#include <cstdlib>
+#include <algorithm>
+#include <array>
+#include <fstream>
+
+const int MAP_SIZE = 10;   // マップ
+const int REPEAT = 100;
+const float FREQUENCY = 0.1f;
+
+// パーリンノイズ関数の前方宣言
+float perlinNoise(float x, float y);
+
+// フェード関数の前方宣言
+float fade(float t);
+
+// 線形補間関数の前方宣言
+float lerp(float t, float a, float b);
+
+// グラデーション関数の前方宣言
+float grad(int hash, float x, float y);
+
+// パーリンノイズに使用するランダムな値の配列
+int p[512];
+
+// パーリンノイズ関数
+float perlinNoise(float x, float y) {
+    int X = static_cast<int>(floor(x)) & 255;
+    int Y = static_cast<int>(floor(y)) & 255;
+    x -= floor(x);
+    y -= floor(y);
+    float u = fade(x);
+    float v = fade(y);
+
+    int A = p[X] + Y;
+    int B = p[X + 1] + Y;
+
+    return lerp(v, lerp(u, grad(p[A], x, y), grad(p[B], x - 1, y)), lerp(u, grad(p[A + 1], x, y - 1), grad(p[B + 1], x - 1, y - 1)));
+}
+
+// フェード関数
+float fade(float t) {
+    return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
+// 線形補間関数
+float lerp(float t, float a, float b) {
+    return a + t * (b - a);
+}
+
+// グラデーション関数
+float grad(int hash, float x, float y) {
+    int h = hash & 15;
+    float u = h < 8 ? x : y;
+    float v = h < 4 ? y : (h == 12 || h == 14) ? x : 0;
+    return ((h & 1) == 0 ? u : -u) + ((h & 2) == 0 ? v : -v);
+}
+
+int main() {
+    std::srand(static_cast<unsigned int>(std::time(nullptr)));
+    std::array<std::array<int, REPEAT>, 20> tempArray = {};
+    float freq = FREQUENCY;
+    /*  double doubleValue;
+      std::cout << "周波数を指定してください";
+      std::cin >> doubleValue;
+      FREQUENCY = static_cast<float>(doubleValue);*/
+      //int mapSize = MAP_SIZE / doubleValue;
+    int mapSize = MAP_SIZE / freq;
+    for (int e = 0; e < REPEAT; e++) {
+        for (int i = 0; i < 512; i++) {
+            p[i] = std::rand() % 256;
+        }
+        for (int y = 0; y < mapSize; y++) {
+            for (int x = 0; x < mapSize; x++) {
+                float value = perlinNoise(x * freq, y * freq);
+                for (int bin = 0; bin < 20; bin++) {
+                    float lowerBound = -1.0f + (bin * 0.1f);
+                    float upperBound = -1.0f + ((bin + 1) * 0.1f);
+
+                    if (value >= lowerBound && value < upperBound) {
+                        tempArray[bin][e]++;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    std::ofstream outFile("output.csv");    //ファイルに書き込む
+
+    for (int e = 0; e < 20; e++) {
+        for (int f = 0; f < REPEAT; f++) {
+            outFile << tempArray[e][f];
+            outFile << ",";
+        }
+        outFile << std::endl;
+    }
+
+    outFile.close();
+
+    return 0;
+}

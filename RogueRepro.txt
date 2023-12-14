@@ -1,0 +1,315 @@
+/********************************************************
+Rogueのマップ生成をC++で再現したコード
+2023/12/11 鈴木康介
+********************************************************/
+#include <iostream>
+#include <memory>
+#include <vector>
+#include <algorithm>
+#include <cstdlib>
+#include <ctime>
+
+//定数宣言
+#define MAX_HEIGHT	(51)
+#define MAX_WIDTH	(51)
+#define MAX_ROOM	(9)
+#define NULL	0
+#define TRUE 	1
+#define	FALSE	0
+
+enum CellInfo {	//cell関連の定数
+	NOTHING,
+	PASS,
+	FLOOR,
+	VWALL,
+	HWALL,
+	ULWALL,
+	URWALL,
+	LLWALL,
+	LRWALL,
+	ISMAZE,
+	ISGONE
+};
+
+struct coord {	//二次元座標
+	int x;
+	int y;
+	coord(int x2,int y2):x(x2),y(y2){}
+	coord():x(0),y(0){}
+	bool operator == (coord temp){
+		return (x == temp.x && y == temp.y);
+	}
+};
+
+struct room {
+	coord r_pos;	//左上の角
+	coord r_max;	//部屋のサイズ
+	int r_flag;
+	room():r_pos(0,0),r_max(0,0),r_flag(0){}
+};
+
+char cell[MAX_HEIGHT][MAX_WIDTH];	//情報を入れておく
+std::vector<coord>frontierArray;
+coord fr;
+std::shared_ptr<room> pRoom;
+int maxx, maxy;
+
+// 関数のプロトタイプ宣言
+void do_room();
+void draw_maze(std::shared_ptr<room> pRoom);
+void draw_room(std::shared_ptr<room> pRoom);
+void con_front();
+void new_frontier(int y, int x);
+void add_frnt(int y, int x);
+void splat(int y, int x);
+bool maze_at(int y, int x);
+void remove_vec(int num);
+bool offmap(int y, int x);
+void rnd_pos(const std::shared_ptr<room> pRoom, coord* pPos);
+void vert(std::shared_ptr<room> rp, int startx);
+void horiz(std::shared_ptr<room> rp, int starty);
+
+void do_room() {	//部屋を作成する関数
+	int endline = MAX_HEIGHT + 1;
+	int rm = 0;
+	coord bsze = { MAX_HEIGHT / 3,MAX_WIDTH / 3 };
+	coord top;
+
+	std::vector<std::shared_ptr<room>>roomArray;
+	for (int e = 0; e < MAX_ROOM-rand()%4; e++) {
+		roomArray.push_back(std::make_shared<room>());
+	}
+
+	int left_out = rand() % 4;
+	for (int e = 0; e < left_out; e++) {
+		do {
+			pRoom = roomArray[rm = rand() % (int)roomArray.size()];
+		} while (pRoom->r_flag & ISMAZE);	//isMazeじゃなかったら抜ける
+		pRoom->r_flag |= ISGONE;
+		//ここでレベル設定が本当は入る
+		if (rm > 2) {
+			pRoom->r_flag |= ISMAZE;
+		}
+	}
+
+	for (int e = 0; e < (int)roomArray.size(); e++) {
+		pRoom = roomArray[e];
+		top.x = (e % 3)*bsze.x + 1;
+		top.y = e / 3 * bsze.y;
+		if(pRoom->r_flag&ISGONE) {
+			if (pRoom->r_flag&ISMAZE) {
+				pRoom->r_pos.x = top.x;
+				pRoom->r_pos.y = top.y;
+				draw_maze(pRoom);
+			}
+			else {	//ここに部屋は作らない 通路を作る
+				do {
+					pRoom->r_pos.x = top.x + rand() % (bsze.x - 2) + 1;
+					pRoom->r_pos.y = top.y + rand() % (bsze.y - 2) + 1;
+					pRoom->r_max.x = -MAX_HEIGHT;
+					pRoom->r_max.y = -endline;
+				} while (!(pRoom->r_pos.y > 0 && pRoom->r_pos.y < endline - 1));
+			}
+			continue;
+		}
+		do {
+			pRoom->r_max.x = rand() % (bsze.x - 4) + 4;
+			pRoom->r_max.y = rand() % (bsze.y - 4) + 4;
+			pRoom->r_pos.x = top.x + rand() % (bsze.x - pRoom->r_max.x);
+			pRoom->r_pos.y = top.y + rand() % (bsze.y - pRoom->r_max.y);
+		} while (pRoom->r_pos.y == 0);
+		draw_room(pRoom);
+	}
+}
+
+void draw_maze(std::shared_ptr<room> pRoom) {	//迷路を生成する
+	maxx = maxy = 0;
+	//ランダムなフロンティアを生成
+	fr = { rand() % MAX_WIDTH , rand() % MAX_HEIGHT };
+	splat(fr.y, fr.x);
+	new_frontier(fr.y, fr.x);
+
+	while ((int)frontierArray.size() > 0) {	//フロンティアがある間
+		con_front();
+		new_frontier(fr.y, fr.x);
+	}
+	// 迷路にループを追加するコード
+	coord* cp;
+	int sh, psgcnt;
+	coord spos;
+	std::cout << std::endl;
+	pRoom->r_max.x = maxx - pRoom->r_pos.x + 1;
+	pRoom->r_max.y = maxy - pRoom->r_pos.y + 1;
+	do {
+		static coord ld[4] = {
+			{-1, 0},
+			{0, 1},
+			{1, 0},
+			{0, -1}
+		};
+		rnd_pos(pRoom, &spos);  // ランダムな位置を選択
+		for (psgcnt = 0, cp = ld, sh = 1; cp < &ld[4]; sh <<= 1, cp++) {
+			int y = cp->y + spos.y;
+			int x = cp->x + spos.x;
+			if (!offmap(y, x) && cell[y][x] == PASS) {
+				psgcnt += sh;
+			}
+		}
+	} while (cell[spos.y][spos.x] == PASS || psgcnt % 5);
+	splat(spos.y, spos.x);  // ループの開始点を通路に変換
+}
+
+void draw_room(std::shared_ptr<room> rp) {	//部屋を作成する
+	vert(rp, rp->r_pos.x);
+	vert(rp, rp->r_pos.x + rp->r_max.x - 1);
+	horiz(rp, rp->r_pos.y);
+	horiz(rp, rp->r_pos.y + rp->r_max.y - 1);
+	cell[rp->r_pos.y][rp->r_pos.x] = ULWALL;
+	cell[rp->r_pos.y][rp->r_pos.x + rp->r_max.x - 1] = URWALL;
+	cell[rp->r_pos.y + rp->r_max.y - 1][rp->r_pos.x] = LLWALL;
+	cell[rp->r_pos.y + rp->r_max.y - 1][rp->r_pos.x + rp->r_max.x - 1] = LRWALL;
+
+	for (int y = rp->r_pos.y + 1; y < rp->r_pos.y + rp->r_max.y - 1; y++) {
+		for (int x = rp->r_pos.x + 1; x < rp->r_pos.x + rp->r_max.x - 1; x++) {
+			cell[y][x] = FLOOR;
+		}
+	}
+}
+
+void con_front() {	//フロンティアからランダムなセルを選択し、既存の迷路に接続する
+	//std::vector<coord>choice;
+	int xdelt = 0, ydelt = 0;
+	int choice[4];
+	int count = 0;
+	int randNum = rand() % (int)frontierArray.size();
+	fr = frontierArray[randNum];
+
+	//フロンティアから削除する
+	remove_vec(randNum);
+
+	if (maze_at(fr.y - 2, fr.x) == true) {
+		choice[count++] = 0;
+	}
+	if (maze_at(fr.y + 2, fr.x) == true) {
+		choice[count++] = 1;
+	}
+	if (maze_at(fr.y, fr.x - 2) == true) {
+		choice[count++] = 2;
+	}
+	if (maze_at(fr.y, fr.x + 2) == true) {
+		choice[count++] = 3;
+	}
+	int which = choice[rand() % count];
+	splat(fr.y, fr.x);
+	switch (which)
+	{
+	case 0: which = 1; ydelt = -1; break;
+	case 1: which = 0; ydelt = 1; break;
+	case 2: which = 3; xdelt = -1; break;
+	case 3: which = 2; xdelt = 1; break;
+	}
+	splat(fr.y + ydelt, fr.x + xdelt);
+}
+
+void new_frontier(int y, int x) {	//現在の迷路から新たなフロンティアを追加する
+	add_frnt(y + 2, x);
+	add_frnt(y - 2, x);
+	add_frnt(y, x + 2);
+	add_frnt(y, x - 2);
+}
+
+void add_frnt(int y, int x) {	//フロンティアに追加する
+	//範囲チェック
+	if (y >= 0 && y < MAX_HEIGHT&&x >= 0 && x < MAX_WIDTH&&cell[y][x] == NOTHING) {
+		if (std::find(frontierArray.begin(), frontierArray.end(), coord(x, y)) == frontierArray.end()) {
+			frontierArray.push_back(coord(x, y));
+		}
+		return;
+	}
+	return;
+}
+
+void splat(int y, int x) {
+	if (cell[y][x] == NOTHING) {
+		cell[y][x] = PASS;
+	}
+	if (x > maxx) {
+		maxx = x;
+	}
+	if (y > maxy) {
+		maxy = y;
+	}
+}
+
+bool maze_at(int y, int x) {	//そこに何があるか
+	if (cell[y][x] == PASS) {
+		return true;
+	}
+	return false;
+}
+
+void remove_vec(int num) {
+	frontierArray.erase(frontierArray.begin() + num);
+}
+
+bool offmap(int y, int x) {
+	return x < 0 || x >= MAX_WIDTH || y < 0 || y >= MAX_HEIGHT;
+}
+
+void rnd_pos(const std::shared_ptr<room> pRoom, coord* pPos) {
+	if (pRoom->r_max.x - 2 == 0) {
+		pPos->x = pRoom->r_pos.x + 1;
+	}
+	else {
+		pPos->x = pRoom->r_pos.x + rand() % (pRoom->r_max.x - 2) + 1;
+	}
+	if(pRoom->r_max.y - 2 == 0){
+		pPos->y = pRoom->r_pos.y + 1;
+	}
+	else {
+		pPos->y = pRoom->r_pos.y + rand() % (pRoom->r_max.y - 2) + 1;
+	}
+}
+
+void vert(std::shared_ptr<room>rp, int startx) {
+	for (int y = rp->r_pos.y + 1; y <= rp->r_max.y + rp->r_pos.y - 1; y++) {
+		cell[y][startx] = VWALL;
+	}
+}
+
+void horiz(std::shared_ptr<room> rp, int starty) {
+	for (int x = rp->r_pos.x + 1; x <= rp->r_max.x + rp->r_pos.x - 1; x++) {
+		cell[starty][x] = HWALL;
+	}
+}
+
+int main(void) {
+	srand((unsigned)time(NULL));	//乱数シードを作
+	for (int y = 0; y < MAX_HEIGHT; y++) {	//初期化
+		for (int x = 0; x < MAX_WIDTH; x++) {
+			cell[y][x] = NOTHING;
+		}
+	}
+	do_room();
+	for (int y = 0; y < MAX_HEIGHT; y++) {	//表示部分
+		for (int x = 0; x < MAX_WIDTH; x++) {
+			switch (cell[y][x]) {
+			case 2:
+				std::cout << ' ';
+				break;
+
+			case PASS:
+				std::cout << '.';
+				break;
+			case 0:
+				std::cout << ' ';
+				break;
+			default:
+				std::cout << '*';
+				break;
+			}
+			std::cout << ' ';
+		}
+		std::cout << std::endl;
+	}
+}
